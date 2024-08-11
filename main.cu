@@ -46,7 +46,7 @@ const int MAXFOODPERPIXEL = 5;
 int food[HEIGHT * WIDTH] = { 0 };
 
 double speed = 1.0;
-double trailDecay = 0.001;
+double trailDecay = 0.01;
 double strengthDecay = 0.001;
 double sensorDistance = 10.0;
 double sensorAngle = M_PI / 4;
@@ -88,12 +88,16 @@ public:
 			if (food[static_cast<int>(y) * WIDTH + static_cast<int>(x)] > 0) {
 				food[static_cast<int>(y) * WIDTH + static_cast<int>(x)]--;
 				hasFood = true;
+				r = 255;
+				b = 0;
 				angle += M_PI;
 				strength = 1.0;
 			}
 		}
 		if ((x - colonyX) * (x - colonyX) + (y - colonyY) * (y - colonyY) < colonyRadius * colonyRadius) {
 			hasFood = false;
+			r = 0;
+			b = 255;
 			angle -= M_PI;
 			move();
 			strength = 1.0;
@@ -233,7 +237,7 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			if (currentButtons.contains(1)) {
+			if (currentButtons.contains(1) || buttons.contains(3)) {
 				for (int i = -BRUSHSIZE; i <= BRUSHSIZE; i++) {
 					for (int j = -BRUSHSIZE; j <= BRUSHSIZE; j++) {
 						if (i * i + j * j < BRUSHSIZE * BRUSHSIZE) {
