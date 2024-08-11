@@ -68,7 +68,7 @@ Pheremone homePheremones[HEIGHT * WIDTH];
 double speed = 1.0;
 double trailDecay = 0.01;
 double strengthDecay = 0.001;
-double sensorDistance = 10.0;
+double sensorDistance = 0.0;
 double sensorAngle = M_PI / 4;
 double rotateAmount = M_PI / 6;
 double randomRotate = M_PI / 12;
@@ -104,10 +104,14 @@ public:
 	}
 	void trail() {
 		if (hasFood) {
-			foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			if (foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength < strength) {
+				foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			}
 		}
 		else {
-			homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			if (homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength < strength) {
+				homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			}
 			if (food[static_cast<int>(y) * WIDTH + static_cast<int>(x)] > 0) {
 				food[static_cast<int>(y) * WIDTH + static_cast<int>(x)]--;
 				hasFood = true;
