@@ -66,9 +66,9 @@ Pheremone foodPheremones[HEIGHT * WIDTH];
 Pheremone homePheremones[HEIGHT * WIDTH];
 
 double speed = 1.0;
-double trailDecay = 0.01;
+double trailDecay = 0.001;
 double strengthDecay = 0.001;
-double sensorDistance = 10.0;
+double antDecay = 0.1;
 double sensorAngle = M_PI / 4;
 double rotateAmount = M_PI / 6;
 double randomRotate = M_PI / 12;
@@ -104,10 +104,14 @@ public:
 	}
 	void trail() {
 		if (hasFood) {
-			foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			if (strength > foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength) {
+				foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			}
 		}
 		else {
-			homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			if (strength > homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength) {
+				homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			}
 			if (food[static_cast<int>(y) * WIDTH + static_cast<int>(x)] > 0) {
 				food[static_cast<int>(y) * WIDTH + static_cast<int>(x)]--;
 				hasFood = true;
@@ -126,53 +130,19 @@ public:
 		}
 	}
 	void sense() {
-		Pheremone frontSensor;
-		Pheremone leftSensor;
-		Pheremone rightSensor;
+		Pheremone sensor;
 		if (hasFood) {
-			frontSensor = homePheremones[static_cast<int>(y + sensorDistance * sin(angle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle))];
-			leftSensor = homePheremones[static_cast<int>(y + sensorDistance * sin(angle + sensorAngle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle + sensorAngle))];
-			rightSensor = homePheremones[static_cast<int>(y + sensorDistance * sin(angle - sensorAngle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle - sensorAngle))];
+			sensor = homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)];
 		}
 		else {
-			frontSensor = foodPheremones[static_cast<int>(y + sensorDistance * sin(angle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle))];
-			leftSensor = foodPheremones[static_cast<int>(y + sensorDistance * sin(angle + sensorAngle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle + sensorAngle))];
-			rightSensor = foodPheremones[static_cast<int>(y + sensorDistance * sin(angle - sensorAngle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle - sensorAngle))];
+			sensor = foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)];
+			foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength -= antDecay;
+			if (foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength < 0.0) {
+				foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength = 0.0;
+			}
 		}
-		double maxStrength = std::max(frontSensor.strength, std::max(leftSensor.strength, rightSensor.strength));
-		if (maxStrength > 0.0) {
-			double newAngle;
-			if (frontSensor.strength == maxStrength) {
-				newAngle = frontSensor.angle;
-			}
-			else if (leftSensor.strength == maxStrength) {
-				newAngle = leftSensor.angle;
-			}
-			else if (rightSensor.strength == maxStrength) {
-				newAngle = rightSensor.angle;
-			}
-			//angle = newAngle + M_PI;
-			angle = mod(angle, 2.0 * M_PI);
-			newAngle = mod(newAngle + M_PI, 2.0 * M_PI);
-			if (abs(angle - newAngle) < rotateAmount) {
-				angle = newAngle;
-			}
-			else if (newAngle < angle) {
-				if (angle - newAngle < M_PI) {
-					angle -= rotateAmount;
-				}
-				else {
-					angle += rotateAmount;
-				}
-			}
-			else {
-				if (newAngle - angle < M_PI) {
-					angle += rotateAmount;
-				}
-				else {
-					angle -= rotateAmount;
-				}
-			}
+		if (sensor.strength > 0.0) {
+			angle = sensor.angle +M_PI;
 		}
 	}
 };
