@@ -71,7 +71,7 @@ double strengthDecay = 0.001;
 double sensorDistance = 10.0;
 double sensorAngle = M_PI / 4;
 double rotateAmount = M_PI / 6;
-double randomRotate = M_PI / 40;
+double randomRotate = M_PI / 12;
 const Uint32 red = 0x01000000, green = 0x00010000, blue = 0x00000100;
 class Ant {
 public:
@@ -98,6 +98,7 @@ public:
 		}
 		else {
 			angle = random() * 2.0 * M_PI;
+			strength = 0.0;
 			return false;
 		}
 	}
