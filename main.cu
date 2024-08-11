@@ -38,19 +38,40 @@ double random() {
 	return static_cast<double>(rand()) / static_cast<double>(RAND_MAX);
 }
 
-const int BRUSHSIZE = 30;
+double mod(double m, double n) {
+	double result = m;
+	if (result < 0) {
+		while (result < 0) {
+			result += n;
+		}
+	}
+	else {
+		while (result > n) {
+			result -= n;
+		}
+	}
+	return result;
+}
 
-double foodPheremones[HEIGHT * WIDTH] = { 0.0 };
-double homePheremones[HEIGHT * WIDTH] = { 0.0 };
+const int BRUSHSIZE = 30;
 const int MAXFOODPERPIXEL = 5;
 int food[HEIGHT * WIDTH] = { 0 };
 
+//strength, angle
+struct Pheremone {
+	double strength = 0.0;
+	double angle = 0.0;
+};
+Pheremone foodPheremones[HEIGHT * WIDTH];
+Pheremone homePheremones[HEIGHT * WIDTH];
+
 double speed = 1.0;
-double trailDecay = 0.001;
+double trailDecay = 0.01;
 double strengthDecay = 0.001;
 double sensorDistance = 10.0;
 double sensorAngle = M_PI / 4;
-double rotateAmount = M_PI / 16;
+double rotateAmount = M_PI / 6;
+double randomRotate = M_PI / 40;
 const Uint32 red = 0x01000000, green = 0x00010000, blue = 0x00000100;
 class Ant {
 public:
@@ -61,6 +82,7 @@ public:
 		pixel_ptr[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = red * r + green * g + blue * b + 255;
 	}
 	bool move() {
+		angle += (2.0 * random() - 1.0) * randomRotate;
 		double deltaX = speed * cos(angle);
 		double deltaY = speed * sin(angle);
 		if (0.0 < x + deltaX && x + deltaX < WIDTH && 0.0 < y + deltaY && y + deltaY < HEIGHT) {
@@ -81,28 +103,31 @@ public:
 	}
 	void trail() {
 		if (hasFood) {
-			foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = strength;
+			foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
 		}
 		else {
-			homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = strength;
+			homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
 			if (food[static_cast<int>(y) * WIDTH + static_cast<int>(x)] > 0) {
 				food[static_cast<int>(y) * WIDTH + static_cast<int>(x)]--;
 				hasFood = true;
-				angle += M_PI;
+				r = 255;
+				b = 0;
+				angle -= M_PI;
 				strength = 1.0;
 			}
 		}
 		if ((x - colonyX) * (x - colonyX) + (y - colonyY) * (y - colonyY) < colonyRadius * colonyRadius) {
 			hasFood = false;
-			angle -= M_PI;
-			move();
+			r = 0;
+			b = 255;
+			angle += M_PI;
 			strength = 1.0;
 		}
 	}
 	void sense() {
-		double frontSensor;
-		double leftSensor;
-		double rightSensor;
+		Pheremone frontSensor;
+		Pheremone leftSensor;
+		Pheremone rightSensor;
 		if (hasFood) {
 			frontSensor = homePheremones[static_cast<int>(y + sensorDistance * sin(angle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle))];
 			leftSensor = homePheremones[static_cast<int>(y + sensorDistance * sin(angle + sensorAngle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle + sensorAngle))];
@@ -113,17 +138,40 @@ public:
 			leftSensor = foodPheremones[static_cast<int>(y + sensorDistance * sin(angle + sensorAngle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle + sensorAngle))];
 			rightSensor = foodPheremones[static_cast<int>(y + sensorDistance * sin(angle - sensorAngle)) * WIDTH + static_cast<int>(x + sensorDistance * cos(angle - sensorAngle))];
 		}
-		if (frontSensor > leftSensor && frontSensor > rightSensor) {
-			return;
-		}
-		else if (frontSensor < leftSensor && frontSensor < rightSensor) {
-			angle += static_cast<float>((2 * (rand() % 2)) - 1) * rotateAmount;
-		}
-		else if (rightSensor > leftSensor) {
-			angle -= rotateAmount;
-		}
-		else if (rightSensor < leftSensor) {
-			angle += rotateAmount;
+		double maxStrength = std::max(frontSensor.strength, std::max(leftSensor.strength, rightSensor.strength));
+		if (maxStrength > 0.0) {
+			double newAngle;
+			if (frontSensor.strength == maxStrength) {
+				newAngle = frontSensor.angle;
+			}
+			else if (leftSensor.strength == maxStrength) {
+				newAngle = leftSensor.angle;
+			}
+			else if (rightSensor.strength == maxStrength) {
+				newAngle = rightSensor.angle;
+			}
+			//angle = newAngle + M_PI;
+			angle = mod(angle, 2.0 * M_PI);
+			newAngle = mod(newAngle + M_PI, 2.0 * M_PI);
+			if (abs(angle - newAngle) < rotateAmount) {
+				angle = newAngle;
+			}
+			else if (newAngle < angle) {
+				if (angle - newAngle < M_PI) {
+					angle -= rotateAmount;
+				}
+				else {
+					angle += rotateAmount;
+				}
+			}
+			else {
+				if (newAngle - angle < M_PI) {
+					angle += rotateAmount;
+				}
+				else {
+					angle -= rotateAmount;
+				}
+			}
 		}
 	}
 };
@@ -233,7 +281,7 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			if (currentButtons.contains(1)) {
+			if (currentButtons.contains(1) || buttons.contains(3)) {
 				for (int i = -BRUSHSIZE; i <= BRUSHSIZE; i++) {
 					for (int j = -BRUSHSIZE; j <= BRUSHSIZE; j++) {
 						if (i * i + j * j < BRUSHSIZE * BRUSHSIZE) {
@@ -246,16 +294,16 @@ int main(int argc, char* argv[]) {
 			}
 
 			for (int i = 0; i < WIDTH * HEIGHT; i++) {
-				if (foodPheremones[i] > 0.0) {
-					foodPheremones[i] -= trailDecay;
-					if (foodPheremones[i] < 0.0) {
-						foodPheremones[i] = 0.0;
+				if (foodPheremones[i].strength > 0.0) {
+					foodPheremones[i].strength -= trailDecay;
+					if (foodPheremones[i].strength < 0.0) {
+						foodPheremones[i].strength = 0.0;
 					}
 				}
-				if (homePheremones[i] > 0.0) {
-					homePheremones[i] -= trailDecay;
-					if (homePheremones[i] < 0.0) {
-						homePheremones[i] = 0.0;
+				if (homePheremones[i].strength > 0.0) {
+					homePheremones[i].strength -= trailDecay;
+					if (homePheremones[i].strength < 0.0) {
+						homePheremones[i].strength = 0.0;
 					}
 				}
 			}
