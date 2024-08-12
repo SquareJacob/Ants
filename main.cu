@@ -54,7 +54,7 @@ double mod(double m, double n) {
 }
 
 const int BRUSHSIZE = 30;
-const int MAXFOODPERPIXEL = 5;
+const int MAXFOODPERPIXEL = 255;
 int food[HEIGHT * WIDTH] = { 0 };
 
 //strength, angle
@@ -71,12 +71,12 @@ double strengthDecay = 0.001;
 double antDecay = 0.1;
 double sensorAngle = M_PI / 4;
 double rotateAmount = M_PI / 6;
-double randomRotate = M_PI / 12;
 const Uint32 red = 0x01000000, green = 0x00010000, blue = 0x00000100;
 class Ant {
 public:
 	uint8_t r = 0, g = 0, b = 0;
 	bool hasFood = false;
+	double randomRotate = random() * random() * M_PI / 2;
 	double x = 0.0, y = 0.0, angle = 0.0, colonyX = 0.0, colonyY = 0.0, colonyRadius = 0.0, strength = 1.0;
 	void draw(Uint32* pixel_ptr) {
 		pixel_ptr[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = red * r + green * g + blue * b + 255;
@@ -147,7 +147,7 @@ public:
 	}
 };
 
-const int ANTS = 25000;
+const int ANTS = 2500;
 class Colony {
 public:
 	uint8_t r = 0, g = 0, b = 255;
