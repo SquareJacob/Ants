@@ -97,7 +97,7 @@ public:
 			return true;
 		}
 		else {
-			angle = random() * 2.0 * M_PI;
+			angle += M_PI;
 			strength = 0.0;
 			return false;
 		}
@@ -125,7 +125,7 @@ public:
 			hasFood = false;
 			r = 0;
 			b = 255;
-			angle += M_PI;
+			angle -= M_PI;
 			strength = 1.0;
 		}
 	}
@@ -142,7 +142,7 @@ public:
 			}
 		}
 		if (sensor.strength > 0.0) {
-			angle = sensor.angle +M_PI;
+			angle = sensor.angle  +M_PI;
 		}
 	}
 };
