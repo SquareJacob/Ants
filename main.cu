@@ -38,7 +38,7 @@ double random() {
 	return static_cast<double>(rand()) / static_cast<double>(RAND_MAX);
 }
 
-double mod(double m, double n) {
+__device__ double mod(double m, double n) {
 	double result = m;
 	if (result < 0) {
 		while (result < 0) {
@@ -54,27 +54,30 @@ double mod(double m, double n) {
 }
 
 const int BRUSHSIZE = 30;
-const int MAXFOODPERPIXEL = 5;
+const int MAXFOODPERPIXEL = 9999;
 int food[HEIGHT * WIDTH] = { 0 };
 const int WALLSIZE = 5;
-int wall[HEIGHT * WIDTH] = { 0 };
+int wall[HEIGHT * WIDTH] = { 0 }, *d_wall;
+size_t allInts = sizeof(int) * static_cast<size_t>(WIDTH * HEIGHT);
 
 //strength, angle
 struct Pheremone {
 	double strength = 0.0;
 	double angle = 0.0;
 };
-Pheremone foodPheremones[HEIGHT * WIDTH];
-Pheremone homePheremones[HEIGHT * WIDTH];
+Pheremone foodPheremones[HEIGHT * WIDTH], *d_foodPheremones;
+Pheremone homePheremones[HEIGHT * WIDTH], *d_homePheremones;
+size_t allPheremones = sizeof(Pheremone) * static_cast<size_t>(WIDTH * HEIGHT);
 
-const int ANGLESAMPLES = 3;
-const int LENGTHSAMPLES = 1;
+const int ANGLESAMPLES = 11;
+const int LENGTHSAMPLES = 32;
 double speed = 1.0;
-double trailDecay = 0.01;
-double strengthDecay = 0.001;
+double trailDecay = 0.001;
+double strengthDecay = 0.0001;
+double antDecay = 0.00;
 double sensorDistance = 10.0;
 double sensorAngle = M_PI / 4;
-double rotateAmountMin = M_PI / 6;
+double rotateAmountMin = M_PI / 20;
 double randomRotate = M_PI / 12;
 const Uint32 red = 0x01000000, green = 0x00010000, blue = 0x00000100;
 class Ant {
@@ -112,7 +115,7 @@ public:
 		}
 		else {
 			angle += M_PI;
-			strength = 0.0;
+			//strength = 0.0;
 			return false;
 		}
 	}
@@ -139,10 +142,11 @@ public:
 			strength = 1.0;
 		}
 	}
-	void sense() {
+	__device__ void sense(int* wall, Pheremone* foodPheremones, Pheremone* homePheremones, double sensorAngle, double sensorDistance, double rotateAmountMin, double antDecay) {
 		Pheremone* toUse;
 		Pheremone sensors[ANGLESAMPLES];
 		double lengths[ANGLESAMPLES];
+		int indices[ANGLESAMPLES];
 		if (hasFood) {
 			toUse = homePheremones;
 		}
@@ -166,12 +170,15 @@ public:
 					sensors[i].angle = current.angle;
 					sensors[i].strength = current.strength;
 					lengths[i] = static_cast<float>(j + 1) / static_cast<float>(LENGTHSAMPLES);
+					indices[i] = y1 * WIDTH + x1;
 				}
 			}
 		}
 		double maxStrength = sensors[0].strength;
 		for (int i = 1; i < ANGLESAMPLES; i++) {
-			maxStrength = std::max(maxStrength, sensors[i].strength);
+			if (sensors[i].strength > maxStrength) {
+				maxStrength = sensors[i].strength;
+			}
 		}
 
 		if (maxStrength > 0.0) {
@@ -181,6 +188,7 @@ public:
 				if (sensors[i].strength == maxStrength) {
 					newAngle = sensors[i].angle;
 					newLength = lengths[i];
+					toUse[indices[i]].strength -= antDecay;
 					break;
 				}
 			}
@@ -210,7 +218,8 @@ public:
 	}
 };
 
-const int ANTS = 25000;
+const int SQRTANTS = 159;
+const int ANTS = SQRTANTS * SQRTANTS;
 class Colony {
 public:
 	uint8_t r = 0, g = 0, b = 255;
@@ -239,7 +248,12 @@ public:
 		}
 	}
 };
-Colony colony;
+Colony colony, * d_colony;
+size_t s_colony = sizeof(colony);
+
+__global__ void sense(Colony* colony, int* wall, Pheremone* foodPheremones, Pheremone* homePheremones, double sensorAngle, double sensorDistance, double rotateAmountMin, double antDecay) {
+	colony->ants[threadIdx.x * SQRTANTS + blockIdx.x].sense(wall, foodPheremones, homePheremones, sensorAngle, sensorDistance, rotateAmountMin, antDecay);
+}
 
 int main(int argc, char* argv[]) {
 	if (SDL_Init(SDL_INIT_EVERYTHING) == 0 && TTF_Init() == 0 && Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) == 0) {
@@ -258,8 +272,14 @@ int main(int argc, char* argv[]) {
 		srand(time(0));
 		colony.setup();
 		for (int i = 0; i < WIDTH * HEIGHT; i++) {
-			food[i] = MAXFOODPERPIXEL;
+			food[i] = 0;
 		}
+
+		cudaSetDevice(0);
+		cudaMalloc((void**)&d_colony, s_colony);
+		cudaMalloc((void**)&d_wall, allInts);
+		cudaMalloc((void**)&d_foodPheremones, allPheremones);
+		cudaMalloc((void**)&d_homePheremones, allPheremones);
 
 		SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
 			SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
@@ -318,7 +338,7 @@ int main(int argc, char* argv[]) {
 			if (buttons.contains(1)) {
 				for (int i = -BRUSHSIZE; i <= BRUSHSIZE; i++) {
 					for (int j = -BRUSHSIZE; j <= BRUSHSIZE; j++) {
-						if (i * i + j * j < BRUSHSIZE * BRUSHSIZE) {
+						if (i * i + j * j < BRUSHSIZE * BRUSHSIZE && 0 <= mouseX + i && mouseX + i <= WIDTH && 0 <= mouseY + j && mouseY + j <= HEIGHT) {
 							food[(mouseY + j) * WIDTH + (mouseX + i)] = MAXFOODPERPIXEL;
 						}
 					}
@@ -328,17 +348,18 @@ int main(int argc, char* argv[]) {
 			if (buttons.contains(3)) {
 				for (int i = -WALLSIZE; i <= WALLSIZE; i++) {
 					for (int j = -WALLSIZE; j <= WALLSIZE; j++) {
-						if (i * i + j * j < WALLSIZE * WALLSIZE) {
+						if (i * i + j * j < WALLSIZE * WALLSIZE && 0 <= mouseX + i && mouseX + i <= WIDTH && 0 <= mouseY + j && mouseY + j <= HEIGHT) {
 							wall[(mouseY + j) * WIDTH + (mouseX + i)] = 1;
 						}
 					}
 				}
 			}
 			else if (buttons.contains(2)) {
-				for (int i = -WALLSIZE; i <= WALLSIZE; i++) {
-					for (int j = -WALLSIZE; j <= WALLSIZE; j++) {
-						if (i * i + j * j < WALLSIZE * WALLSIZE) {
+				for (int i = -BRUSHSIZE; i <= BRUSHSIZE; i++) {
+					for (int j = -BRUSHSIZE; j <= BRUSHSIZE; j++) {
+						if (i * i + j * j < BRUSHSIZE * BRUSHSIZE && 0 <= mouseX + i && mouseX + i <= WIDTH && 0 <= mouseY + j && mouseY + j <= HEIGHT) {
 							wall[(mouseY + j) * WIDTH + (mouseX + i)] = 0;
+							food[(mouseY + j) * WIDTH + (mouseX + i)] = 0;
 						}
 					}
 				}
@@ -371,6 +392,17 @@ int main(int argc, char* argv[]) {
 						a->trail();
 					}
 				}
+
+				cudaMemcpy(d_colony, &colony, s_colony, cudaMemcpyHostToDevice);
+				cudaMemcpy(d_wall, wall, allInts, cudaMemcpyHostToDevice);
+				cudaMemcpy(d_foodPheremones, foodPheremones, allPheremones, cudaMemcpyHostToDevice);
+				cudaMemcpy(d_homePheremones, homePheremones, allPheremones, cudaMemcpyHostToDevice);
+				sense << <SQRTANTS, SQRTANTS >> > (d_colony, d_wall, d_foodPheremones, d_homePheremones, sensorAngle, sensorDistance, rotateAmountMin, antDecay);
+				cudaDeviceSynchronize();
+				cudaMemcpy(&colony, d_colony, s_colony, cudaMemcpyDeviceToHost);
+				cudaMemcpy(wall, d_wall, allInts, cudaMemcpyDeviceToHost);
+				cudaMemcpy(foodPheremones, d_foodPheremones, allPheremones, cudaMemcpyDeviceToHost);
+				cudaMemcpy(homePheremones, d_homePheremones, allPheremones, cudaMemcpyDeviceToHost);
 			}
 
 			SDL_LockTexture(texture, NULL, &txtPixels, &pitch);
@@ -384,11 +416,7 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			for (int i = 0; i < ANTS; i++) {
-				a = &colony.ants[i];
-				if (playing) {
-					a->sense();
-				}
-				a->draw(pixel_ptr);
+				colony.ants[i].draw(pixel_ptr);
 			}
 			colony.draw(pixel_ptr);
 			SDL_UnlockTexture(texture);
@@ -397,6 +425,10 @@ int main(int argc, char* argv[]) {
 		}
 
 		//Clean up
+		cudaFree(d_colony);
+		cudaFree(d_wall);
+		cudaFree(d_foodPheremones);
+		cudaFree(d_homePheremones);
 		if (window) {
 			SDL_DestroyWindow(window);
 		}
