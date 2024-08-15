@@ -67,12 +67,14 @@ struct Pheremone {
 Pheremone foodPheremones[HEIGHT * WIDTH];
 Pheremone homePheremones[HEIGHT * WIDTH];
 
+const int ANGLESAMPLES = 3;
+const int LENGTHSAMPLES = 1;
 double speed = 1.0;
 double trailDecay = 0.01;
 double strengthDecay = 0.001;
 double sensorDistance = 10.0;
 double sensorAngle = M_PI / 4;
-double rotateAmount = M_PI / 6;
+double rotateAmountMin = M_PI / 6;
 double randomRotate = M_PI / 12;
 const Uint32 red = 0x01000000, green = 0x00010000, blue = 0x00000100;
 class Ant {
@@ -138,37 +140,51 @@ public:
 		}
 	}
 	void sense() {
-		Pheremone sensors[3]; //front, left, right
-		double angles[] = {angle, angle + sensorAngle, angle - sensorAngle};
 		Pheremone* toUse;
+		Pheremone sensors[ANGLESAMPLES];
+		double lengths[ANGLESAMPLES];
 		if (hasFood) {
 			toUse = homePheremones;
 		}
 		else {
 			toUse = foodPheremones;
 		}
-		for (int i = 0; i < 3; i++) {
-			sensors[i] = toUse[static_cast<int>(y + sensorDistance * sin(angles[i])) * WIDTH + static_cast<int>(x + sensorDistance * cos(angles[i]))];
+		Pheremone current;
+		double length, angle1;
+		int x1, y1;
+		for (int i = 0; i <	ANGLESAMPLES; i++) {
+			angle1 = angle + sensorAngle * (2.0 * static_cast<float>(i) / static_cast<float>(ANGLESAMPLES - 1) - 1.0);
+			for (int j = 0; j < LENGTHSAMPLES; j++) {
+				length = static_cast<float>(j + 1) / static_cast<float>(LENGTHSAMPLES) * sensorDistance;
+				x1 = static_cast<int>(x + length * cos(angle1));
+				y1 = static_cast<int>(y + length * sin(angle1));
+				if (wall[y1 * WIDTH + x1] == 1 || x1 < 0 || WIDTH < x1 || y1 < 0 || HEIGHT < y1) {
+					break;
+				}
+				current = toUse[y1 * WIDTH + x1];
+				if (current.strength > sensors[i].strength) {
+					sensors[i].angle = current.angle;
+					sensors[i].strength = current.strength;
+					lengths[i] = static_cast<float>(j + 1) / static_cast<float>(LENGTHSAMPLES);
+				}
+			}
 		}
-		double maxStrength = std::max(sensors[0].strength, std::max(sensors[1].strength, sensors[2].strength));
+		double maxStrength = sensors[0].strength;
+		for (int i = 1; i < ANGLESAMPLES; i++) {
+			maxStrength = std::max(maxStrength, sensors[i].strength);
+		}
+
 		if (maxStrength > 0.0) {
 			double newAngle;
-			/**if (sensors[0].strength == maxStrength) {
-				newAngle = sensors[0].angle;
-			}
-			else if (sensors[1].strength == maxStrength) {
-				newAngle = sensors[1].angle;
-			}
-			else if (sensors[2].strength == maxStrength) {
-				newAngle = sensors[2].angle;
-			}**/
-			for (int i = 0; i < 3; i++) {
+			double newLength;
+			for (int i = 0; i < ANGLESAMPLES; i++) {
 				if (sensors[i].strength == maxStrength) {
 					newAngle = sensors[i].angle;
+					newLength = lengths[i];
 					break;
 				}
 			}
-			//angle = newAngle + M_PI;
+			double rotateAmount = rotateAmountMin / newLength;
 			angle = mod(angle, 2.0 * M_PI);
 			newAngle = mod(newAngle + M_PI, 2.0 * M_PI);
 			if (abs(angle - newAngle) < rotateAmount) {
