@@ -72,9 +72,9 @@ size_t allPheremones = sizeof(Pheremone) * static_cast<size_t>(WIDTH * HEIGHT);
 const int ANGLESAMPLES = 11;
 const int LENGTHSAMPLES = 32;
 double speed = 1.0;
-double trailDecay = 0.001;
+double trailDecay = 0.00001;
 double strengthDecay = 0.0001;
-double antDecay = 0.00;
+double antDecay = 0.0;
 double sensorDistance = 10.0;
 double sensorAngle = M_PI / 4;
 double rotateAmountMin = M_PI / 20;
@@ -84,19 +84,24 @@ class Ant {
 public:
 	uint8_t r = 0, g = 0, b = 0;
 	bool hasFood = false;
-	double x = 0.0, y = 0.0, angle = 0.0, colonyX = 0.0, colonyY = 0.0, colonyRadius = 0.0, strength = 1.0;
+	double x = 0.0, y = 0.0, angle = 0.0, colonyX = 0.0, colonyY = 0.0, colonyRadius = 0.0, strength = 1.0, lastStrength = 0.0;
 	void setup() {
 		double angle = random() * 2.0 * M_PI;
 		x = colonyX + colonyRadius * cos(angle);
 		y = colonyY + colonyRadius * sin(angle);
 		this->angle = angle;
-		strength = 0.0;
+		if (hasFood) {
+			strength = 0.0;
+		}
+		else {
+			strength = 1.0;
+		}
 	}
 	void draw(Uint32* pixel_ptr) {
 		pixel_ptr[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = red * r + green * g + blue * b + 255;
 	}
 	bool move() {
-		angle += (2.0 * random() - 1.0) * randomRotate;
+		angle += (2.0 * random() - 1.0) * randomRotate * (1.0 - lastStrength);
 		double deltaX = speed * cos(angle);
 		double deltaY = speed * sin(angle);
 		if (0.0 < x + deltaX && x + deltaX < WIDTH && 0.0 < y + deltaY && y + deltaY < HEIGHT && wall[static_cast<int>(y + deltaY) * WIDTH + static_cast<int>(x+ deltaX)] == 0){
@@ -166,6 +171,10 @@ public:
 					break;
 				}
 				current = toUse[y1 * WIDTH + x1];
+				toUse[y1 * WIDTH + x1].strength -= antDecay;
+				if (toUse[y1 * WIDTH + x1].strength < 0.0) {
+					toUse[y1 * WIDTH + x1].strength = 0.0;
+				}
 				if (current.strength > sensors[i].strength) {
 					sensors[i].angle = current.angle;
 					sensors[i].strength = current.strength;
@@ -188,7 +197,10 @@ public:
 				if (sensors[i].strength == maxStrength) {
 					newAngle = sensors[i].angle;
 					newLength = lengths[i];
-					toUse[indices[i]].strength -= antDecay;
+					/**toUse[indices[i]].strength -= antDecay;
+					if (toUse[indices[i]].strength < 0.0) {
+						toUse[indices[i]].strength = 0.0;
+					}**/
 					break;
 				}
 			}
@@ -290,7 +302,10 @@ int main(int argc, char* argv[]) {
 
 		//Main loop
 		running = true;
-		bool playing = true;
+		bool playing = false;
+		bool showAnts = true;
+		bool showPheremones = false;
+		bool showStuff = true;
 		while (running) {
 			//handle events
 			for (std::string i : keys) {
@@ -368,6 +383,15 @@ int main(int argc, char* argv[]) {
 			if (currentKeys.contains("Space")) {
 				playing = !playing;
 			}
+			if (currentKeys.contains("Q")) {
+				showAnts = !showAnts;
+			}
+			if (currentKeys.contains("W")) {
+				showPheremones = !showPheremones;
+			}
+			if (currentKeys.contains("E")) {
+				showStuff = !showStuff;
+			}
 
 			Ant* a;
 			if (playing) {
@@ -408,17 +432,29 @@ int main(int argc, char* argv[]) {
 			SDL_LockTexture(texture, NULL, &txtPixels, &pitch);
 			pixel_ptr = (Uint32*)txtPixels;
 			for (int i = 0; i < WIDTH * HEIGHT; i++) {
-				if (wall[i] == 0) {
-					pixel_ptr[i] = (food[i] * 255 / MAXFOODPERPIXEL) * green + 255;
+				pixel_ptr[i] = 0;
+				if (showPheremones) {
+					pixel_ptr[i] = static_cast<Uint32>(255.0 * foodPheremones[i].strength) * red + static_cast<Uint32>(255.0 * homePheremones[i].strength) * blue + 255;
 				}
-				else {
-					pixel_ptr[i] = (red + green + blue) * 127 + 255;
+				if (showStuff) {
+					if (wall[i] == 0) {
+						if (food[i] > 0) {
+							pixel_ptr[i] = (food[i] * 255 / MAXFOODPERPIXEL) * green + 255;
+						}
+					}
+					else {
+						pixel_ptr[i] = (red + green + blue) * 127 + 255;
+					}
 				}
 			}
-			for (int i = 0; i < ANTS; i++) {
-				colony.ants[i].draw(pixel_ptr);
+			if (showAnts) {
+				for (int i = 0; i < ANTS; i++) {
+					colony.ants[i].draw(pixel_ptr);
+				}
 			}
-			colony.draw(pixel_ptr);
+			if (showStuff) {
+				colony.draw(pixel_ptr);
+			}
 			SDL_UnlockTexture(texture);
 			SDL_RenderCopy(renderer, texture, NULL, NULL);
 			SDL_RenderPresent(renderer);
