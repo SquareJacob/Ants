@@ -74,7 +74,7 @@ const int LENGTHSAMPLES = 32;
 double speed = 1.0;
 double trailDecay = 0.00001;
 double strengthDecay = 0.0001;
-double antDecay = 0.0;
+double antDecay = 0.01;
 double sensorDistance = 10.0;
 double sensorAngle = M_PI / 4;
 double rotateAmountMin = M_PI / 20;
@@ -149,7 +149,6 @@ public:
 	}
 	__device__ void sense(int* wall, Pheremone* foodPheremones, Pheremone* homePheremones, double sensorAngle, double sensorDistance, double rotateAmountMin, double antDecay) {
 		Pheremone* toUse;
-		Pheremone sensors[ANGLESAMPLES];
 		double lengths[ANGLESAMPLES];
 		int indices[ANGLESAMPLES];
 		if (hasFood) {
@@ -159,8 +158,8 @@ public:
 			toUse = foodPheremones;
 		}
 		Pheremone current;
-		double length, angle1;
-		int x1, y1;
+		double length, angle1, totalx = 0.0, totaly = 0.0, maxStrength = 0.0;
+		int x1, y1, samples = 0;
 		for (int i = 0; i <	ANGLESAMPLES; i++) {
 			angle1 = angle + sensorAngle * (2.0 * static_cast<float>(i) / static_cast<float>(ANGLESAMPLES - 1) - 1.0);
 			for (int j = 0; j < LENGTHSAMPLES; j++) {
@@ -175,38 +174,23 @@ public:
 				if (toUse[y1 * WIDTH + x1].strength < 0.0) {
 					toUse[y1 * WIDTH + x1].strength = 0.0;
 				}
-				if (current.strength > sensors[i].strength) {
-					sensors[i].angle = current.angle;
-					sensors[i].strength = current.strength;
+				if (current.strength > 0.0) {
+					samples++;
+					totalx += cos(current.angle) * current.strength;
+					totaly += sin(current.angle) * current.strength;
 					lengths[i] = static_cast<float>(j + 1) / static_cast<float>(LENGTHSAMPLES);
 					indices[i] = y1 * WIDTH + x1;
+					if (current.strength > maxStrength) {
+						maxStrength = current.strength;
+					}
 				}
 			}
 		}
-		double maxStrength = sensors[0].strength;
-		for (int i = 1; i < ANGLESAMPLES; i++) {
-			if (sensors[i].strength > maxStrength) {
-				maxStrength = sensors[i].strength;
-			}
-		}
-
 		if (maxStrength > 0.0) {
 			double newAngle;
-			double newLength;
-			for (int i = 0; i < ANGLESAMPLES; i++) {
-				if (sensors[i].strength == maxStrength) {
-					newAngle = sensors[i].angle;
-					newLength = lengths[i];
-					/**toUse[indices[i]].strength -= antDecay;
-					if (toUse[indices[i]].strength < 0.0) {
-						toUse[indices[i]].strength = 0.0;
-					}**/
-					break;
-				}
-			}
-			double rotateAmount = rotateAmountMin / newLength;
+			double rotateAmount = rotateAmountMin;
 			angle = mod(angle, 2.0 * M_PI);
-			newAngle = mod(newAngle + M_PI, 2.0 * M_PI);
+			newAngle = mod(atan2(totaly / static_cast<float>(samples), totalx / static_cast<float>(samples)) + M_PI, 2.0 * M_PI);
 			if (abs(angle - newAngle) < rotateAmount) {
 				angle = newAngle;
 			}
