@@ -1,0 +1,1 @@
+A simple exploration of path optimization using an ant simulation. The ants are released from a home and have to explore to find food. Upon finding food, they want to bring it back to their home. Ants do not remember anything, and instead release pheremones to notify other ants about the direction of food and home, and rely on these pheremones to find what they are looking for.
