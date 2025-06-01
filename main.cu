@@ -9,6 +9,9 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdio.h>
+#include <queue>
+#include <vector>
+#include <deque>
 #define _CRTDBG_MAP_ALLOC
 #ifdef _DEBUG
 #define new new( _NORMAL_BLOCK, __FILE__, __LINE__)
@@ -64,29 +67,41 @@ size_t allInts = sizeof(int) * static_cast<size_t>(WIDTH * HEIGHT);
 struct Pheremone {
 	double strength = 0.0;
 	double angle = 0.0;
+	double amount = 0.0;
 };
 Pheremone foodPheremones[HEIGHT * WIDTH], *d_foodPheremones;
 Pheremone homePheremones[HEIGHT * WIDTH], *d_homePheremones;
 size_t allPheremones = sizeof(Pheremone) * static_cast<size_t>(WIDTH * HEIGHT);
 
 const int ANGLESAMPLES = 11;
-const int LENGTHSAMPLES = 32;
+const int LENGTHSAMPLES = 15;
+const int PATHSTORAGE = 200;
 double speed = 1.0;
-double trailDecay = 0.00001;
-double strengthDecay = 0.0001;
-double antDecay = 0.0;
-double sensorDistance = 10.0;
-double sensorAngle = M_PI / 4;
+double trailDecay = 0.001;
+double strengthFactor = 0.99999;
+double antDecay = 0.0000;
+double sensorDistance = 100.0;
+double sensorAngle = M_PI / 2;
 double rotateAmountMin = M_PI / 20;
 double randomRotate = M_PI / 12;
 const Uint32 red = 0x01000000, green = 0x00010000, blue = 0x00000100;
+class Colony {
+public:
+	uint8_t r = 0, g = 0, b = 255;
+	int radius = 15.0, x = WIDTH / 2, y = HEIGHT / 2;
+	double foodAngle = 0.0;
+	bool isFoodAngle = false;
+};
 class Ant {
 public:
 	uint8_t r = 0, g = 0, b = 0;
 	bool hasFood = false;
 	double x = 0.0, y = 0.0, angle = 0.0, colonyX = 0.0, colonyY = 0.0, colonyRadius = 0.0, strength = 1.0, lastStrength = 0.0;
-	void setup() {
-		double angle = random() * 2.0 * M_PI;
+	Colony* colony = NULL;
+	std::deque<int> xStored;
+	std::deque<int> yStored;
+	Ant() : xStored(PATHSTORAGE, 0), yStored(PATHSTORAGE, 0) {};
+	void setup(double angle = random() * 2.0 * M_PI) {
 		x = colonyX + colonyRadius * cos(angle);
 		y = colonyY + colonyRadius * sin(angle);
 		this->angle = angle;
@@ -100,15 +115,34 @@ public:
 	void draw(Uint32* pixel_ptr) {
 		pixel_ptr[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = red * r + green * g + blue * b + 255;
 	}
+	void drawPath(Uint32* pixel_ptr) {
+		for (int i = 0; i < PATHSTORAGE; i++) {
+			pixel_ptr[yStored[i] * WIDTH + xStored[i]] = red * 255 + green * 127 + blue * 80 + 255;
+		}
+	}
+	void drawPathIfHovered(Uint32* pixel_ptr) {
+		if (hypot(static_cast<int>(x) - mouseX, static_cast<int>(y) - mouseY) < 3.0) {
+			drawPath(pixel_ptr);
+		}
+	}
 	bool move() {
-		angle += (2.0 * random() - 1.0) * randomRotate * (1.0 - lastStrength);
+		if (lastStrength == 0.0) {
+			angle += (2.0 * random() - 1.0) * randomRotate;
+		}
+		else {
+			angle += (2.0 * random() - 1.0) * randomRotate;
+		}
 		double deltaX = speed * cos(angle);
 		double deltaY = speed * sin(angle);
 		if (0.0 < x + deltaX && x + deltaX < WIDTH && 0.0 < y + deltaY && y + deltaY < HEIGHT && wall[static_cast<int>(y + deltaY) * WIDTH + static_cast<int>(x+ deltaX)] == 0){
+			xStored.pop_front();
+			xStored.push_back(static_cast<int>(x));
+			yStored.pop_front();
+			yStored.push_back(static_cast<int>(y));
 			x += deltaX;
 			y += deltaY;
 			if (strength > 0.0) {
-				strength -= strengthDecay;
+				strength *= strengthFactor;
 				if (strength < 0.0) {
 					strength = 0.0;
 				}
@@ -126,10 +160,14 @@ public:
 	}
 	void trail() {
 		if (hasFood) {
-			foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			if (foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength < strength) {
+				foodPheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle, 1.0 };
+			}
 		}
 		else {
-			homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle };
+			if (homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)].strength < strength) {
+				homePheremones[static_cast<int>(y) * WIDTH + static_cast<int>(x)] = { strength, angle, 1.0 };
+			}
 			if (food[static_cast<int>(y) * WIDTH + static_cast<int>(x)] > 0) {
 				food[static_cast<int>(y) * WIDTH + static_cast<int>(x)]--;
 				hasFood = true;
@@ -143,7 +181,12 @@ public:
 			hasFood = false;
 			r = 0;
 			b = 255;
-			angle += M_PI;
+			if (colony->isFoodAngle) {
+				setup(colony->foodAngle);
+			}
+			else {
+				angle += M_PI;
+			}
 			strength = 1.0;
 		}
 	}
@@ -168,13 +211,14 @@ public:
 				x1 = static_cast<int>(x + length * cos(angle1));
 				y1 = static_cast<int>(y + length * sin(angle1));
 				if (wall[y1 * WIDTH + x1] == 1 || x1 < 0 || WIDTH < x1 || y1 < 0 || HEIGHT < y1) {
+					sensors[i].strength = 0.0;
 					break;
 				}
 				current = toUse[y1 * WIDTH + x1];
-				toUse[y1 * WIDTH + x1].strength -= antDecay;
+				/**toUse[y1 * WIDTH + x1].strength -= antDecay;
 				if (toUse[y1 * WIDTH + x1].strength < 0.0) {
 					toUse[y1 * WIDTH + x1].strength = 0.0;
-				}
+				}**/
 				if (current.strength > sensors[i].strength) {
 					sensors[i].angle = current.angle;
 					sensors[i].strength = current.strength;
@@ -189,18 +233,18 @@ public:
 				maxStrength = sensors[i].strength;
 			}
 		}
-
+		lastStrength = maxStrength;
 		if (maxStrength > 0.0) {
 			double newAngle;
 			double newLength;
 			for (int i = 0; i < ANGLESAMPLES; i++) {
 				if (sensors[i].strength == maxStrength) {
-					newAngle = sensors[i].angle;
 					newLength = lengths[i];
-					/**toUse[indices[i]].strength -= antDecay;
+					newAngle = sensors[i].angle + sensorAngle * (2.0 * static_cast<float>(i) / static_cast<float>(ANGLESAMPLES - 1) - 1.0) * newLength;
+					toUse[indices[i]].strength -= antDecay;
 					if (toUse[indices[i]].strength < 0.0) {
 						toUse[indices[i]].strength = 0.0;
-					}**/
+					}
 					break;
 				}
 			}
@@ -232,10 +276,8 @@ public:
 
 const int SQRTANTS = 159;
 const int ANTS = SQRTANTS * SQRTANTS;
-class Colony {
+class ColonySecondary : public Colony {
 public:
-	uint8_t r = 0, g = 0, b = 255;
-	int radius = 15.0, x = WIDTH / 2, y = HEIGHT / 2;
 	Ant ants[ANTS];
 	void draw(Uint32* pixel_ptr) {
 		for (int i = -radius; i <= radius; i++) {
@@ -256,14 +298,33 @@ public:
 			a->colonyX = x;
 			a->colonyY = y;
 			a->colonyRadius = radius;
+			a->colony = this;
 			a->setup();
 		}
 	}
+	void update() {
+		double maxStrength = 0.0;
+		double current;
+		isFoodAngle = false;
+		int r = radius + 1;
+		for (int i = -r - 1; i <= r; i++) {
+			for (int j = -r - 1; j <= r; j++) {
+				if (radius * radius < i * i + j * j && i * i + j * j < r * r) {
+					current = foodPheremones[(y + j) * WIDTH + (x + i)].strength;
+					if (current > maxStrength) {
+						foodAngle = atan2(j, i);
+						isFoodAngle = true;
+						maxStrength = current;
+					}
+				}
+			}
+		}
+	}
 };
-Colony colony, * d_colony;
-size_t s_colony = sizeof(colony);
+ColonySecondary colony, * d_colony;
+size_t s_colony = sizeof(ColonySecondary);
 
-__global__ void sense(Colony* colony, int* wall, Pheremone* foodPheremones, Pheremone* homePheremones, double sensorAngle, double sensorDistance, double rotateAmountMin, double antDecay) {
+__global__ void sense(ColonySecondary* colony, int* wall, Pheremone* foodPheremones, Pheremone* homePheremones, double sensorAngle, double sensorDistance, double rotateAmountMin, double antDecay) {
 	colony->ants[threadIdx.x * SQRTANTS + blockIdx.x].sense(wall, foodPheremones, homePheremones, sensorAngle, sensorDistance, rotateAmountMin, antDecay);
 }
 
@@ -369,7 +430,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			else if (buttons.contains(2)) {
+			if (buttons.contains(2) || keys.contains("P")) {
 				for (int i = -BRUSHSIZE; i <= BRUSHSIZE; i++) {
 					for (int j = -BRUSHSIZE; j <= BRUSHSIZE; j++) {
 						if (i * i + j * j < BRUSHSIZE * BRUSHSIZE && 0 <= mouseX + i && mouseX + i <= WIDTH && 0 <= mouseY + j && mouseY + j <= HEIGHT) {
@@ -396,15 +457,17 @@ int main(int argc, char* argv[]) {
 			Ant* a;
 			if (playing) {
 				for (int i = 0; i < WIDTH * HEIGHT; i++) {
-					if (foodPheremones[i].strength > 0.0) {
-						foodPheremones[i].strength -= trailDecay;
-						if (foodPheremones[i].strength < 0.0) {
+					if (foodPheremones[i].amount > 0.0) {
+						foodPheremones[i].amount -= trailDecay;
+						if (foodPheremones[i].amount <= 0.0) {
+							foodPheremones[i].amount = 0.0;
 							foodPheremones[i].strength = 0.0;
 						}
 					}
-					if (homePheremones[i].strength > 0.0) {
-						homePheremones[i].strength -= trailDecay;
-						if (homePheremones[i].strength < 0.0) {
+					if (homePheremones[i].amount > 0.0) {
+						homePheremones[i].amount -= trailDecay;
+						if (homePheremones[i].amount <= 0.0) {
+							homePheremones[i].amount = 0.0;
 							homePheremones[i].strength = 0.0;
 						}
 					}
@@ -416,6 +479,7 @@ int main(int argc, char* argv[]) {
 						a->trail();
 					}
 				}
+				colony.update();
 
 				cudaMemcpy(d_colony, &colony, s_colony, cudaMemcpyHostToDevice);
 				cudaMemcpy(d_wall, wall, allInts, cudaMemcpyHostToDevice);
@@ -434,7 +498,7 @@ int main(int argc, char* argv[]) {
 			for (int i = 0; i < WIDTH * HEIGHT; i++) {
 				pixel_ptr[i] = 0;
 				if (showPheremones) {
-					pixel_ptr[i] = static_cast<Uint32>(255.0 * foodPheremones[i].strength) * red + static_cast<Uint32>(255.0 * homePheremones[i].strength) * blue + 255;
+					pixel_ptr[i] = static_cast<Uint32>(255.0 * foodPheremones[i].strength * foodPheremones[i].amount) * red + static_cast<Uint32>(255.0 * homePheremones[i].strength * homePheremones[i].amount) * blue + 255;
 				}
 				if (showStuff) {
 					if (wall[i] == 0) {
@@ -454,6 +518,11 @@ int main(int argc, char* argv[]) {
 			}
 			if (showStuff) {
 				colony.draw(pixel_ptr);
+			}
+			if (!playing && buttons.size() == 0) {
+				for (int i = 0; i < ANTS; i++) {
+					colony.ants[i].drawPathIfHovered(pixel_ptr);
+				}
 			}
 			SDL_UnlockTexture(texture);
 			SDL_RenderCopy(renderer, texture, NULL, NULL);
